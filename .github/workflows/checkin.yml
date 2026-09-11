@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout
@@ -32,6 +32,16 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python checkin.py
+
+      - name: Update README timestamp
+        if: always()
+        run: |
+          local_time=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          sed -i -E "s/> 最近运行时间：.*/> 最近运行时间：${local_time} (UTC+8)/g" README.md
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add README.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "docs: update run timestamp [skip ci]" && git push)
 
       - name: clear old run jobs
         if: always()
