@@ -1,18 +1,19 @@
 # iamhc 自动签到脚本
 
-自动登录 [api.hcnsec.cn](https://api.hcnsec.cn)并执行每日签到，签到后通过 Telegram 推送通知(可选)。
+> 最近运行时间：2026-09-11 22:00:00 (UTC+8)
 
+自动登录 [api.hcnsec.cn](https://api.hcnsec.cn)并执行每日签到，签到后通过 Telegram 推送通知(可选)。
 
 ### 配置 Secrets
 
 在仓库 **Settings → Secrets and variables → Actions** 中添加以下 Secrets：
 
-| Secret 名称 | 说明 |
-|-------------|------|
-| `EMAIL` | 登录邮箱(必填) |
-| `PASSWORD` | 登录密码(必填) |
+| Secret 名称      | 说明                     |
+| ---------------- | ------------------------ |
+| `EMAIL`        | 登录邮箱(必填)           |
+| `PASSWORD`     | 登录密码(必填)           |
 | `TG_BOT_TOKEN` | Telegram Bot Token(可选) |
-| `TG_CHAT_ID` | Telegram Chat ID(可选)  |
+| `TG_CHAT_ID`   | Telegram Chat ID(可选)   |
 
 ### 手动触发
 
