@@ -5,7 +5,6 @@ import os
 import sys
 import time
 import requests
-from urllib.parse import quote
 
 
 # =========================
@@ -25,140 +24,8 @@ TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
 
 BASE_URL = "https://api.hcnsec.cn"
 
-# new-api 默认：
 # 500000 quota = 1$
 QUOTA_PER_UNIT = 500000
-
-# 当前站点暂未开启 Turnstile
-TURNSTILE_TOKEN = ""
-
-
-# =========================
-# 工具函数
-# =========================
-
-def print_json_debug(title, data):
-    """打印 API 返回结果，方便排查接口结构变化。"""
-    print("\n" + "=" * 60)
-    print(title)
-    print("=" * 60)
-
-    try:
-        print(data)
-    except Exception:
-        print(repr(data))
-
-    print("=" * 60)
-
-
-def extract_user_id(data):
-    """
-    尝试从不同的新/旧 API 返回结构中提取用户 ID。
-
-    支持例如：
-
-    {
-        "data": {
-            "id": 123
-        }
-    }
-
-    或：
-
-    {
-        "data": {
-            "user": {
-                "id": 123
-            }
-        }
-    }
-
-    或：
-
-    {
-        "data": {
-            "user_id": 123
-        }
-    }
-    """
-
-    if not isinstance(data, dict):
-        return None
-
-    # 第一层 data
-    user_data = data.get("data")
-
-    if isinstance(user_data, dict):
-
-        # 直接 data.id
-        for key in ("id", "user_id", "userId"):
-            value = user_data.get(key)
-
-            if value is not None and str(value).strip():
-                return value
-
-        # data.user
-        nested_user = user_data.get("user")
-
-        if isinstance(nested_user, dict):
-            for key in ("id", "user_id", "userId"):
-                value = nested_user.get(key)
-
-                if value is not None and str(value).strip():
-                    return value
-
-        # data.data
-        nested_data = user_data.get("data")
-
-        if isinstance(nested_data, dict):
-            for key in ("id", "user_id", "userId"):
-                value = nested_data.get(key)
-
-                if value is not None and str(value).strip():
-                    return value
-
-    # 极少数接口可能直接返回 user_id
-    for key in ("id", "user_id", "userId"):
-        value = data.get(key)
-
-        if value is not None and str(value).strip():
-            return value
-
-    return None
-
-
-def extract_username(data):
-    """尝试从常见结构中获取用户名。"""
-
-    if not isinstance(data, dict):
-        return ""
-
-    user_data = data.get("data")
-
-    if isinstance(user_data, dict):
-
-        for key in ("username", "name", "email"):
-            value = user_data.get(key)
-
-            if value:
-                return str(value)
-
-        nested_user = user_data.get("user")
-
-        if isinstance(nested_user, dict):
-            for key in ("username", "name", "email"):
-                value = nested_user.get(key)
-
-                if value:
-                    return str(value)
-
-    for key in ("username", "name", "email"):
-        value = data.get(key)
-
-        if value:
-            return str(value)
-
-    return ""
 
 
 # =========================
@@ -166,12 +33,9 @@ def extract_username(data):
 # =========================
 
 def login(session: requests.Session):
-    """登录并返回用户信息。"""
+    """登录，返回用户信息和 access_token。"""
 
-    login_url = (
-        f"{BASE_URL}/api/user/login"
-        f"?turnstile={quote(TURNSTILE_TOKEN)}"
-    )
+    url = f"{BASE_URL}/api/user/login"
 
     headers = {
         "Accept": "application/json, text/plain, */*",
@@ -188,7 +52,7 @@ def login(session: requests.Session):
 
     try:
         resp = session.post(
-            login_url,
+            url,
             headers=headers,
             json=payload,
             timeout=20,
@@ -211,38 +75,59 @@ def login(session: requests.Session):
         print(resp.text[:2000])
         return None
 
-    # DEBUG：完整显示登录接口返回
-    print_json_debug("DEBUG：登录接口返回", data)
-
     if not data.get("success"):
         print("登录失败:", data.get("message", ""))
         return None
 
-    # 自动提取 ID
-    user_id = extract_user_id(data)
+    user_data = data.get("data", {})
 
-    # 自动提取用户名
-    username = extract_username(data)
+    if not isinstance(user_data, dict):
+        print("登录成功，但 data 结构异常")
+        return None
+
+    # =========================
+    # 新版 API：
+    # data.access_token
+    # data.user.id
+    # =========================
+
+    access_token = user_data.get("access_token", "")
+
+    user = user_data.get("user", {})
+
+    if not isinstance(user, dict):
+        user = {}
+
+    user_id = user.get("id")
+    username = user.get("username") or user.get("display_name") or EMAIL
+
+    if not access_token:
+        print("❌ 登录成功，但没有获取到 access_token")
+        return None
 
     if not user_id:
-        print("⚠️ 登录接口 success=true，但仍未找到用户 ID。")
-        print("请检查上面的 DEBUG 返回结构。")
+        print("❌ 登录成功，但没有获取到用户 ID")
         return None
 
     print(
-        f"✅ 登录成功 | 账户: "
-        f"{username or EMAIL} | ID: {user_id}"
+        f"✅ 登录成功 | "
+        f"账户: {username} | "
+        f"ID: {user_id}"
     )
 
-    # 显示 Cookie
+    # Session Cookie 会自动保留
     if session.cookies:
         print("✅ 登录 Cookie 已保存:")
         for cookie in session.cookies:
-            print(f"   {cookie.name}={cookie.value[:20]}...")
+            print(
+                f"   {cookie.name}="
+                f"{cookie.value[:20]}..."
+            )
 
     return {
         "id": user_id,
-        "username": username or EMAIL,
+        "username": username,
+        "access_token": access_token,
     }
 
 
@@ -250,16 +135,16 @@ def login(session: requests.Session):
 # 获取用户信息
 # =========================
 
-def get_user_info(session: requests.Session, user_id):
-    """获取用户信息。"""
+def get_user_info(session: requests.Session, access_token):
+    """通过 Bearer Token 获取当前用户信息。"""
 
     url = f"{BASE_URL}/api/user/self"
 
     headers = {
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "Mozilla/5.0",
+        "Authorization": f"Bearer {access_token}",
         "Referer": BASE_URL,
-        "New-Api-User": str(user_id),
     }
 
     try:
@@ -272,7 +157,10 @@ def get_user_info(session: requests.Session, user_id):
         print("获取用户信息请求异常:", e)
         return None
 
-    print(f"用户信息 HTTP 状态码: {resp.status_code}")
+    print(
+        f"用户信息 HTTP 状态码: "
+        f"{resp.status_code}"
+    )
 
     try:
         data = resp.json()
@@ -281,15 +169,12 @@ def get_user_info(session: requests.Session, user_id):
         print(resp.text[:2000])
         return None
 
-    # DEBUG
-    print_json_debug("DEBUG：/api/user/self 返回", data)
-
     if data.get("success"):
         return data.get("data", {})
 
     print(
         "获取用户信息失败:",
-        data.get("message", "")
+        data.get("message", ""),
     )
 
     return None
@@ -299,8 +184,8 @@ def get_user_info(session: requests.Session, user_id):
 # 签到
 # =========================
 
-def checkin(session: requests.Session, user_id):
-    """执行签到。"""
+def checkin(session: requests.Session, access_token):
+    """通过 Bearer Token 执行签到。"""
 
     url = f"{BASE_URL}/api/user/checkin"
 
@@ -308,9 +193,9 @@ def checkin(session: requests.Session, user_id):
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
+        "Authorization": f"Bearer {access_token}",
         "Origin": BASE_URL,
         "Referer": BASE_URL,
-        "New-Api-User": str(user_id),
     }
 
     try:
@@ -322,12 +207,16 @@ def checkin(session: requests.Session, user_id):
         )
     except requests.RequestException as e:
         print("签到请求异常:", e)
+
         return {
             "success": False,
             "message": str(e),
         }
 
-    print(f"签到 HTTP 状态码: {resp.status_code}")
+    print(
+        f"签到 HTTP 状态码: "
+        f"{resp.status_code}"
+    )
 
     try:
         data = resp.json()
@@ -337,11 +226,11 @@ def checkin(session: requests.Session, user_id):
 
         return {
             "success": False,
-            "message": f"HTTP {resp.status_code}，返回非 JSON",
+            "message": (
+                f"HTTP {resp.status_code}，"
+                f"返回非 JSON"
+            ),
         }
-
-    # DEBUG
-    print_json_debug("DEBUG：/api/user/checkin 返回", data)
 
     return data
 
@@ -351,14 +240,14 @@ def checkin(session: requests.Session, user_id):
 # =========================
 
 def quota_to_dollar(quota):
-    """将内部 quota 转换成美元金额。"""
-
     try:
         quota = int(quota or 0)
     except (ValueError, TypeError):
         quota = 0
 
-    return round(quota / QUOTA_PER_UNIT)
+    return round(
+        quota / QUOTA_PER_UNIT
+    )
 
 
 # =========================
@@ -404,7 +293,10 @@ def send_notification(message):
             )
 
     except Exception as e:
-        print("Telegram 通知发送异常:", e)
+        print(
+            "Telegram 通知发送异常:",
+            e,
+        )
 
 
 # =========================
@@ -413,17 +305,11 @@ def send_notification(message):
 
 def main():
 
-    # -------------------------
-    # 检查环境变量
-    # -------------------------
-
     if not EMAIL or not PASSWORD:
-
         print(
             "请先设置 EMAIL 和 PASSWORD "
-            "环境变量。"
+            "环境变量"
         )
-
         sys.exit(1)
 
     print("=" * 60)
@@ -433,49 +319,39 @@ def main():
     print("账户:", EMAIL)
     print("API:", BASE_URL)
 
-    # -------------------------
-    # Session
-    # -------------------------
-
     session = requests.Session()
 
     session.headers.update({
         "User-Agent": "Mozilla/5.0",
     })
 
-    # -------------------------
+    # =========================
     # 登录
-    # -------------------------
+    # =========================
 
     user = login(session)
 
     if not user:
-
         print("\n❌ 登录失败，无法继续签到")
-
         sys.exit(1)
 
     user_id = user["id"]
-    username = user.get(
-        "username",
-        str(user_id),
-    )
+    username = user["username"]
+    access_token = user["access_token"]
 
-    # -------------------------
-    # 获取签到前余额
-    # -------------------------
+    # =========================
+    # 签到前余额
+    # =========================
 
     print("\n正在获取签到前余额...")
 
     info_before = get_user_info(
         session,
-        user_id,
+        access_token,
     )
 
     if not info_before:
-
         print("❌ 获取用户信息失败")
-
         sys.exit(1)
 
     balance_before = quota_to_dollar(
@@ -487,41 +363,39 @@ def main():
         f"{balance_before}$"
     )
 
-    # -------------------------
+    # =========================
     # 签到
-    # -------------------------
+    # =========================
 
     print("\n正在执行签到...")
 
     checkin_data = checkin(
         session,
-        user_id,
+        access_token,
     )
 
-    # -------------------------
-    # 获取签到后余额
-    # -------------------------
+    # =========================
+    # 签到后余额
+    # =========================
 
     print("\n正在获取签到后余额...")
 
     info_after = get_user_info(
         session,
-        user_id,
+        access_token,
     )
 
     if not info_after:
-
         print("❌ 获取签到后用户信息失败")
-
         sys.exit(1)
 
     balance_after = quota_to_dollar(
         info_after.get("quota", 0)
     )
 
-    # -------------------------
-    # 当前时间
-    # -------------------------
+    # =========================
+    # 时间
+    # =========================
 
     local_time = time.gmtime(
         time.time() + 8 * 3600
@@ -532,9 +406,9 @@ def main():
         local_time,
     )
 
-    # -------------------------
+    # =========================
     # 判断签到结果
-    # -------------------------
+    # =========================
 
     success = checkin_data.get(
         "success",
@@ -567,13 +441,10 @@ def main():
         )
 
         if awarded_quota:
-
             awarded_dollar = quota_to_dollar(
                 awarded_quota
             )
-
         else:
-
             awarded_dollar = (
                 balance_after -
                 balance_before
@@ -589,8 +460,10 @@ def main():
             f"✅ 签到成功,本次签到获得"
             f"{awarded_dollar}$\n"
             f"👤 登录账户: {username}\n"
-            f"💰 昨日余额: {balance_before}$\n"
-            f"💰 当前余额: {balance_after}$\n"
+            f"💰 签到前余额: "
+            f"{balance_before}$\n"
+            f"💰 当前余额: "
+            f"{balance_after}$\n"
             f"⏱️ 签到时间: {now}"
         )
 
@@ -609,8 +482,8 @@ def main():
             f"🎁 iamhc 签到通知\n\n"
             f"✅ 今日你已经签到过了！\n"
             f"👤 登录账户: {username}\n"
-            f"💰 昨日余额: {balance_before}$\n"
-            f"💰 当前余额: {balance_after}$\n"
+            f"💰 当前余额: "
+            f"{balance_after}$\n"
             f"⏱️ 签到时间: {now}"
         )
 
@@ -624,21 +497,17 @@ def main():
             f"🎁 iamhc 签到通知\n\n"
             f"❌ 签到失败: {msg}\n"
             f"👤 登录账户: {username}\n"
-            f"💰 昨日余额: {balance_before}$\n"
-            f"💰 当前余额: {balance_after}$\n"
+            f"💰 当前余额: "
+            f"{balance_after}$\n"
             f"⏱️ 签到时间: {now}"
         )
 
-    # -------------------------
+    # =========================
     # Telegram
-    # -------------------------
+    # =========================
 
     send_notification(message)
 
-
-# =========================
-# Entry
-# =========================
 
 if __name__ == "__main__":
     main()
